@@ -13,6 +13,8 @@
 </div>
 
 ---
+> [!WARNING]
+> This project is in an early alpha stage. Expect bugs, breaking changes, and incomplete features.
 
 PenCode is a desktop application designed to bridge the gap between code and visual art. It provides a minimalist interface with a powerful, easy-to-learn language for creating generative artwork. The environment features a live-reloading canvas that responds to your code as you type, offering immediate visual feedback.
 
