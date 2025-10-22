@@ -78,6 +78,10 @@ Install the frontend dependencies using Bun.
 bun install
 ```
 
+```sh
+bun run build
+```
+
 ### 4. Run in Development
 
 Once dependencies are installed, you can start the application.
