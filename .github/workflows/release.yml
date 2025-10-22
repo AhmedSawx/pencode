@@ -1,0 +1,201 @@
+name: Build and Release
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Nightly build
+  push:
+    tags:
+      - "alpha*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release Version (e.g., v1.0.0). Leave empty for a test build."
+        required: false
+        type: string
+      ref:
+        description: "Branch or tag to build from"
+        required: true
+        type: string
+        default: "main"
+      bypass_gate:
+        description: 'Set to "true" to bypass the 24-hour build check.'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check_time.outputs.should_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history to get commit timestamps
+
+      - name: Check time since last successful run's commit
+        id: check_time
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Always run for tag pushes or if bypass is set
+          if [[ "${{ github.ref }}" == refs/tags/* || "${{ github.event.inputs.bypass_gate }}" == "true" ]]; then
+            echo "Bypassing gate for tag push or manual bypass."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # For push, schedule, or default manual runs, perform checks
+          echo "Checking build conditions..."
+          LAST_RUN_JSON=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/release.yml/runs?branch=${{ github.ref_name }}&status=success&per_page=1")
+
+          LAST_SUCCESSFUL_SHA=$(echo "$LAST_RUN_JSON" | jq -r '.workflow_runs[0].head_sha')
+
+          CURRENT_SHA=$(git rev-parse HEAD)
+
+          if [ -z "$LAST_SUCCESSFUL_SHA" ]; then
+            echo "No previous successful run found. Proceeding with build."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [ "$CURRENT_SHA" == "$LAST_SUCCESSFUL_SHA" ]; then
+            echo "Current commit ($CURRENT_SHA) is the same as the last successful build ($LAST_SUCCESSFUL_SHA). Skipping."
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "New commit detected ($CURRENT_SHA). Last successful build was for ($LAST_SUCCESSFUL_SHA). Proceeding with build."
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.should_run == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      max-parallel: 1
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Get short SHA and Branch Name
+        id: vars
+        shell: bash
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "branch_name=$(echo ${{ github.event.inputs.ref || github.ref_name }} | sed 's/refs\/heads\///g')" >> $GITHUB_OUTPUT
+
+      - name: Determine Artifact Name
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "ARTIFACT_NAME=pencode-${{ github.ref_name }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" == "schedule" ]; then
+            echo "ARTIFACT_NAME=pencode-nightly-${{ steps.vars.outputs.sha_short }}" >> $GITHUB_ENV
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "ARTIFACT_NAME=pencode-${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          else
+            echo "ARTIFACT_NAME=pencode-dev-${{ steps.vars.outputs.branch_name }}-${{ steps.vars.outputs.sha_short }}" >> $GITHUB_ENV
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirement.txt
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Build frontend
+        run: bun run build
+
+      - name: Create build directory
+        run: mkdir build
+
+      - name: Build with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: main.py
+          mode: ${{ runner.os == 'macOS' && 'app' || 'onefile' }}
+          enable-plugins: pyside6
+          include-qt-plugins: webview
+          assume-yes-for-downloads: true
+          jobs: 1
+          lto: no
+          include-data-dir: |
+            dist=dist
+            public=public
+          windows-console-mode: "disable"
+          output-dir: build
+          macos-app-name: Pencode
+          output-file: Pencode
+          caching-key: nuitka-cache-${{ runner.os }}-${{ hashFiles('**/requirement.txt') }}
+
+      - name: Set artifact path
+        id: set_path
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            echo "artifact_path=build/Pencode.exe" >> $GITHUB_OUTPUT
+          elif [ "${{ runner.os }}" == "macOS" ]; then
+            # Nuitka action creates main.app, rename it to what we expect
+            mv build/main.app build/Pencode.app
+            echo "artifact_path=build/Pencode.app" >> $GITHUB_OUTPUT
+          else
+            echo "artifact_path=build/Pencode" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-${{ runner.os }}
+          path: ${{ steps.set_path.outputs.artifact_path }}
+
+  release:
+    needs: build
+    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.version != '') || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Build Changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          body: ${{ steps.build_changelog.outputs.changelog }}
+          files: dist/*/*
