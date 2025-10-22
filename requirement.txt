@@ -1,0 +1,12 @@
+bottle==0.13.4
+packaging==25.0
+proxy-tools==0.1.0
+pyside6==6.10.0
+pyside6-addons==6.10.0
+pyside6-essentials==6.10.0
+pywebview==5.4
+qtpy==2.4.3
+shiboken6==6.10.0
+typing-extensions==4.15.0
+imageio
+imageio-ffmpeg

@@ -1,0 +1,14 @@
+# Bun configuration file
+[install]
+# Automatically save exact versions in package.json
+exact = true
+
+# Use bun.lock for lock file
+lockfile = true
+
+# Disable npm/yarn/pnpm from running accidentally
+registry = "https://registry.npmjs.org"
+
+[run]
+# Enable auto install for missing dependencies
+auto = true
