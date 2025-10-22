@@ -149,7 +149,7 @@ jobs:
           windows-console-mode: "disable"
           output-dir: build
           macos-app-name: Pencode
-          output-file: Pencode
+          output-filename: Pencode
           caching-key: nuitka-cache-${{ runner.os }}-${{ hashFiles('**/requirement.txt') }}
 
       - name: Set artifact path
@@ -159,8 +159,6 @@ jobs:
           if [ "${{ runner.os }}" == "Windows" ]; then
             echo "artifact_path=build/Pencode.exe" >> $GITHUB_OUTPUT
           elif [ "${{ runner.os }}" == "macOS" ]; then
-            # Nuitka action creates main.app, rename it to what we expect
-            mv build/main.app build/Pencode.app
             echo "artifact_path=build/Pencode.app" >> $GITHUB_OUTPUT
           else
             echo "artifact_path=build/Pencode" >> $GITHUB_OUTPUT
@@ -187,6 +185,20 @@ jobs:
         with:
           path: dist
 
+      - name: Archive build artifacts
+        run: |
+          cd dist
+          for dir in *; do
+            if [ -d "$dir" ]; then
+              if [[ "$dir" == *windows* ]]; then
+                (cd "$dir" && zip -r "../../${dir}.zip" *)
+              else
+                (cd "$dir" && tar -czvf "../../${dir}.tar.gz" *)
+              fi
+            fi
+          done
+          cd ..
+
       - name: Build Changelog
         id: build_changelog
         uses: mikepenz/release-changelog-builder-action@v4
@@ -198,4 +210,6 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           body: ${{ steps.build_changelog.outputs.changelog }}
-          files: dist/*/*
+          files: |
+            dist/*.zip
+            dist/*.tar.gz
