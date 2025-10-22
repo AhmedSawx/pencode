@@ -1,4 +1,6 @@
 bottle==0.13.4
+nuitka==2.8.1
+ordered-set==4.1.0
 packaging==25.0
 proxy-tools==0.1.0
 pyside6==6.10.0
@@ -8,5 +10,4 @@ pywebview==5.4
 qtpy==2.4.3
 shiboken6==6.10.0
 typing-extensions==4.15.0
-imageio
-imageio-ffmpeg
+zstandard==0.25.0
