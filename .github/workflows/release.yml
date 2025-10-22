@@ -149,7 +149,7 @@ jobs:
           windows-console-mode: "disable"
           output-dir: build
           macos-app-name: Pencode
-          output-filename: Pencode
+          output-file: Pencode
           caching-key: nuitka-cache-${{ runner.os }}-${{ hashFiles('**/requirement.txt') }}
 
       - name: Set artifact path
@@ -159,6 +159,7 @@ jobs:
           if [ "${{ runner.os }}" == "Windows" ]; then
             echo "artifact_path=build/Pencode.exe" >> $GITHUB_OUTPUT
           elif [ "${{ runner.os }}" == "macOS" ]; then
+            mv build/main.app build/Pencode.app
             echo "artifact_path=build/Pencode.app" >> $GITHUB_OUTPUT
           else
             echo "artifact_path=build/Pencode" >> $GITHUB_OUTPUT
